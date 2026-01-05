@@ -1,12 +1,13 @@
 import os
 import pandas as pd
-
+import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, MaxAbsScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-
+from sklearn.utils.multiclass import type_of_target
+from scipy.sparse import csr_matrix, issparse
 
 
 class Preprocess:
@@ -57,21 +58,82 @@ class Preprocess:
         data_path = os.path.join(path, name + ".data")
         solution_path = os.path.join(path, name + ".solution")
         type_path = os.path.join(path, name + ".type")
-        
-        
-        # Détection simple du genre de data avec ":" comme (data_F) pour éviter ParserError
-        with open(data_path, "r", encoding="utf-8", errors="ignore") as f:
-            first_line = f.readline().strip()
-            if ":" in first_line:
-                print("Erreur: dataset sparse détecté (format index:val). Ce loader (pandas) ne gère pas ce genre de Dataset pour l'instant.")
-                return None
-        
-        
-        data = pd.read_csv(data_path, sep=r"\s+", header=None)
+
+        # Charger y et types d'abord pour utiliser n_features dans le cas de sparse
         labels = pd.read_csv(solution_path, sep=r"\s+", header=None)
         types = pd.read_csv(type_path, header=None)[0].tolist()
-        
+        n_features = len(types)
+
+        is_sparse = False
+        with open(data_path, "r", encoding="utf-8", errors="ignore") as f:
+           for line in f:
+               line = line.strip()
+               if line:
+                  is_sparse = (":" in line)
+                  break
+
+        if is_sparse:
+            print("dataset sparse détecté (format index:val).")
+            X = Preprocess.load_sparse_data_file(data_path, n_features=n_features, n_rows_expected=len(labels))
+            return X, labels, types, name
+
+        data = pd.read_csv(data_path, sep=r"\s+", header=None)
+        if data.shape[1] != n_features:
+             raise ValueError(f"Mismatch features: X={data.shape[1]} mais .type={n_features}")
+
         return data, labels, types, name
+    
+    @staticmethod
+    def load_sparse_data_file(data_path, n_features, n_rows_expected=None):
+        
+        data_vals = []
+        row_ind = []
+        col_ind = []
+
+        n_rows = 0
+
+        with open(data_path, "r", encoding="utf-8", errors="ignore") as f:
+            for r_idx, line in enumerate(f):
+                n_rows = r_idx + 1  
+                parts = line.strip().split()
+                for token in parts:
+                    if ":" not in token:
+                        continue
+                    c_str, v_str = token.split(":", 1)
+                    c = int(c_str)
+                    v = float(v_str)
+                    row_ind.append(r_idx)
+                    col_ind.append(c)
+                    data_vals.append(v)
+
+        # Cas fichier vide ou sans index:value
+        if n_rows == 0:
+            return csr_matrix((0, n_features))
+
+        if len(col_ind) == 0:
+            X = csr_matrix((n_rows, n_features))
+        else:
+            # Conversion éventuelle 1-based -> 0-based
+            if min(col_ind) == 1:
+                col_ind = [c - 1 for c in col_ind]
+
+            # Pour éviter le cas d'un index hors dimension
+            if max(col_ind) >= n_features:
+                raise ValueError(
+                    f"Index colonne hors limite: max_col={max(col_ind)} mais n_features={n_features}. "
+                    "Vérifie la base (0/1) et le fichier .type."
+                )
+
+            X = csr_matrix((data_vals, (row_ind, col_ind)), shape=(n_rows, n_features))
+
+        # Vérification cohérence avec y
+        if n_rows_expected is not None and n_rows != n_rows_expected:
+            raise ValueError(f"Mismatch lignes: X={n_rows} vs y={n_rows_expected}")
+
+        return X
+    
+    
+    
     
     # Charger Notre DataSet en faisons appel à la fonction static load_dataset avec un path valid
     # Dans le cas de path invalid des message d'erreur s'affiche 
@@ -140,6 +202,10 @@ class Preprocess:
             self.numerical_index, self.categorical_index, self.binary_index = self.get_feature_type_indices()
         
         task = self.detect_task_type()
+        if issparse(self.data):
+            missing_in_data = int(np.isnan(self.data.data).sum())  
+        else:
+            missing_in_data = int(self.data.isna().sum().sum())
         
         info = {
             "nom_du_dataset": self.name,
@@ -154,7 +220,7 @@ class Preprocess:
             "nombre_binary_feature": len(self.binary_index),
             
             # Missing values les valeurs Nan
-            "missing_in_data": int(self.data.isna().sum().sum()),
+            "missing_in_data": missing_in_data,
             "missing_in_solution": int(self.labels.isna().sum().sum()),
             
             # Type de tâche
@@ -176,7 +242,7 @@ class Preprocess:
                 d[f"label_{j}"] = int(self.labels.iloc[:, j].sum())
             info["label_distribution"] = d
             info["class_distribution"] = None
-        
+    
         elif task in ["regression", "regression_multioutput"]:
             info["class_distribution"] = None
         
@@ -184,7 +250,42 @@ class Preprocess:
             info["class_distribution"] = None
         
         return info
+
+    #retourner un vecteur 1D pour stratify
+    #ça aide pour eviter un peu le désiquilibre de classe 
+    def get_stratify_vector(self , y_df):
     
+        if y_df is None:
+            return None
+
+        task = self.detect_task_type()
+
+        if task in ["binary", "multiclass"]:
+            return y_df.iloc[:, 0].to_numpy()
+
+        if task == "multiclass_onehot":
+            return y_df.values.argmax(axis=1)
+
+        #pas de stratify dans le cas de d'autre type de probléme  
+        return None
+
+    def check_imbalance(self, rare_threshold=0.10):
+         y_strat = self.get_stratify_vector(self.labels)
+         if y_strat is None:
+             return False, None, []
+
+         unique, counts = np.unique(y_strat, return_counts=True)
+         total = counts.sum()
+
+         distribution_percent = {
+             k : round((v / int(total)) * 100, 2)
+             for k, v in zip(unique, counts)
+         }
+
+         rare_classes = [cls for cls, pct in distribution_percent.items() if pct < rare_threshold * 100]
+         is_imbalanced = (len(rare_classes) > 0)
+         return is_imbalanced, distribution_percent, rare_classes
+
     
     # On itére sur la liste types de features pour retourner la liste des index pour chaque type (numerical ou categorical ou binary)
     def get_feature_type_indices(self):
@@ -195,6 +296,13 @@ class Preprocess:
     
     # Stratégie de nettoyage + encodage (+ normalisation optionnelle)
     def build_preprocessor(self, scale_numeric=True):
+        
+        # On gére d'abord le cas de saprse Dataset dans ce cas on fait un preprocessing simple
+        if self.data is not None and issparse(self.data):
+            if scale_numeric:
+                return Pipeline(steps=[("scaler", MaxAbsScaler())])
+            return "passthrough"
+        
         self.numerical_index, self.categorical_index, self.binary_index = self.get_feature_type_indices()
         
         # Si le type de features et numeric on applique la mediane sur les donner Nan
@@ -243,9 +351,23 @@ class Preprocess:
             return None
         
         temp_size = test_size + validation_size
-        self.train_data, X_temp, self.train_labels, y_temp = train_test_split(self.data, self.labels, test_size=temp_size, random_state=random_state)
-        
+        strat = self.get_stratify_vector(self.labels) 
+       
+        # Premier Split
+        try:
+            self.train_data, X_temp, self.train_labels, y_temp = train_test_split(self.data, self.labels, test_size=temp_size, random_state=random_state, stratify=strat)
+        except ValueError:
+            # fallback sans stratify (au cas où classe trop rare)
+            self.train_data, X_temp, self.train_labels, y_temp = train_test_split(self.data, self.labels, test_size=temp_size, random_state=random_state, stratify=None)
+
         validation_ratio = validation_size / temp_size
-        self.validation_data, self.test_data, self.validation_labels, self.test_labels = train_test_split(X_temp, y_temp, test_size=(1 - validation_ratio), random_state=random_state)
+        strat2 = self.get_stratify_vector(y_temp) 
         
+        # Deuxième Split
+        try:
+            self.validation_data, self.test_data, self.validation_labels, self.test_labels = train_test_split(X_temp, y_temp, test_size=(1 - validation_ratio), random_state=random_state, stratify=strat2)
+        except ValueError:
+            # fallback sans stratify (au cas où classe trop rare)
+            self.validation_data, self.test_data, self.validation_labels, self.test_labels = train_test_split(X_temp, y_temp, test_size=(1 - validation_ratio), random_state=random_state, stratify=None)
+
         return self.train_data, self.validation_data, self.test_data, self.train_labels, self.validation_labels, self.test_labels
