@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler, MaxAbsScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, MaxAbsScaler,LabelEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.utils.multiclass import type_of_target
@@ -18,6 +18,7 @@ class Preprocess:
         self.data = None
         self.labels = None
         self.types = None
+        self.label_encoder = None
         self.name = None
         self.numerical_index = None
         self.categorical_index = None
@@ -142,7 +143,6 @@ class Preprocess:
         result = Preprocess.load_dataset(self.path)
         if result is None:
             return None
-        
         self.data, self.labels, self.types, self.name = result
         return result
     
@@ -184,12 +184,35 @@ class Preprocess:
             row_sums = y.sum(axis=1)
             if np.all(row_sums == 1):
                 return "multiclass_onehot"
+            if n_cols<=4:
+                return "multiclass_code"
             return "multilabel"
         
         if target_type == "continuous-multioutput":
             return "regression_multioutput"
         
         return f"inconnu_{target_type}"
+    
+    def encode_target(self, y):
+        if self.labels is None:
+            print("Erreur: appelle load() avant encode_target().")
+            return None
+        task = self.detect_task_type()
+        if task in ["multiclass_code"]:
+            print("Transformation Multilabel -> Multiclass (Label Powerset)...")
+            # 1. On convertit le DataFrame/Array en tableau de chaînes (ex: "1010")
+            # On s'assure d'abord que c'est du numpy pour éviter les soucis de DataFrame
+            y_arr = np.array(y)
+            y_str = ["".join(row.astype(str)) for row in y_arr]
+            
+            # 2. On encode ces chaînes en entiers (0, 1, 2...)
+            encoder = LabelEncoder()
+            y_encoded = encoder.fit_transform(y_str)
+            
+            return y_encoded, encoder
+            
+        # Si ce n'est pas du multiclass_code, on ne touche à rien
+        return y, None
     
     
     def get_dataset_info(self):
@@ -228,7 +251,7 @@ class Preprocess:
         }
         
         # Distribution des classes / labels
-        if task in ["binary", "multiclass"]:
+        if task in ["binary", "multiclass", "multiclass_code"]:
             info["class_distribution"] = self.labels.iloc[:, 0].value_counts().to_dict()
         
         elif task == "multiclass_onehot":
@@ -260,7 +283,7 @@ class Preprocess:
 
         task = self.detect_task_type()
 
-        if task in ["binary", "multiclass"]:
+        if task in ["binary", "multiclass", "multiclass_code"]:
             return y_df.iloc[:, 0].to_numpy()
 
         if task == "multiclass_onehot":
@@ -349,6 +372,13 @@ class Preprocess:
         if self.data is None or self.labels is None:
             print("Erreur: appelle load() avant split().")
             return None
+        encoded_labels, encoder = self.encode_target(self.labels)
+        
+        if encoder is not None:
+            print(f"Encodage automatique effectué. (Nouveau format: {encoded_labels.shape})")
+            self.label_encoder = encoder
+            #On reconvertit en DataFrame pour garder la compatibilité avec le reste du code (.iloc)
+            self.labels = pd.DataFrame(encoded_labels, columns=["target"])
         
         temp_size = test_size + validation_size
         strat = self.get_stratify_vector(self.labels) 

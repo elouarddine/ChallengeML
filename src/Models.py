@@ -1,10 +1,8 @@
-from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
-from sklearn.multiclass import OneVsRestClassifier
+
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_validate
 from sklearn.metrics import get_scorer
+
 import os
 import csv
 import json
@@ -27,25 +25,58 @@ class Models:
         rs = self.random_state
         t = self.task_type
 
-        if t in ("binary", "multiclass", "multiclass_onehot"):
+        if t in ("binary", "multiclass","multiclass_code", "multiclass_onehot"):
+            #import des modèles de classification
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
+            from xgboost import XGBClassifier
+            from lightgbm import LGBMClassifier
+            from catboost import CatBoostClassifier
+
+
+
             return [
                 ("logreg", LogisticRegression(max_iter=2000, random_state=rs)),
                 ("rf", RandomForestClassifier(random_state=rs)),
                 ("hgb", HistGradientBoostingClassifier(random_state=rs)),
+                ("xgb", XGBClassifier(random_state=rs)),
+                ("lgbm", LGBMClassifier(random_state=rs, verbose=-1)),
+                ("cat", CatBoostClassifier(random_state=rs, verbose=0))
             ]
 
         if t == "regression":
+            #import des modèles de régression
+            from sklearn.linear_model import Ridge, ElasticNet
+            from sklearn.ensemble import RandomForestRegressor, HistGradientBoostingRegressor
+            from xgboost import XGBRegressor
+            from lightgbm import LGBMRegressor
+            from catboost import CatBoostRegressor
+
             return [
+                
                 ("ridge", Ridge()),
+                ("elastic", ElasticNet(random_state=rs)),  
                 ("rf_reg", RandomForestRegressor(random_state=rs)),
                 ("hgb_reg", HistGradientBoostingRegressor(random_state=rs)),
+                ("xgb_reg", XGBRegressor(random_state=rs)),
+                ("lgbm_reg", LGBMRegressor(random_state=rs, verbose=-1)),
+                ("cat_reg", CatBoostRegressor(random_state=rs, verbose=0))
             ]
 
         if t == "multilabel":
+            #import des modèles de multilabel
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
+            from sklearn.multiclass import OneVsRestClassifier
+            from lightgbm import LGBMClassifier
+
             return [
                 ("ovr_logreg", OneVsRestClassifier(LogisticRegression(max_iter=2000, random_state=rs))),
                 ("ovr_rf", OneVsRestClassifier(RandomForestClassifier(random_state=rs))),
                 ("ovr_hgb", OneVsRestClassifier(HistGradientBoostingClassifier(random_state=rs))),
+                ("rf_native", RandomForestClassifier(random_state=rs)), # Pas de OneVsRest)
+                ("ovr_lgbm", OneVsRestClassifier(LGBMClassifier(random_state=rs, verbose=-1)))
+                
             ]
 
         return []
