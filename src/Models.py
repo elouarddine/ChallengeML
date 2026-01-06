@@ -6,7 +6,7 @@ from sklearn.ensemble import VotingClassifier,VotingRegressor
 from sklearn.base import clone
 from skopt import BayesSearchCV
 
-import models_prams as mp
+from src import models_prams as mp
 import os
 import csv
 import json
@@ -116,7 +116,7 @@ class Models:
     def get_scoring(self, rare_threshold=0.10):
 
         t = self.task_type
-        is_imb, _, _ = self.pre.check_imbalance(y_df=self.pre.train_labels, rare_threshold=rare_threshold)
+        is_imb, _, _ = self.pre.check_imbalance(rare_threshold=rare_threshold)
 
         if t in ("binary", "multiclass", "multiclass_onehot"):
             main_key = "f1_macro" if is_imb else "accuracy"
@@ -158,7 +158,7 @@ class Models:
             n_iter = 10 # Rapide pour le tri initial
         elif method == "full":
             params_dict = model_info.get('params_full', {})
-            n_iter = 50 # Approfondi pour le Top 3
+            n_iter = 20 # Approfondi pour le Top 3
         else:
             # Fallback
             params_dict = {}
@@ -188,7 +188,7 @@ class Models:
             scoring=scoring, # Doit être une métrique unique (ex: 'roc_auc')
             n_jobs=n_jobs,
             random_state=42,
-            verbose=0
+            verbose=3
         )
 
         try:
@@ -212,7 +212,7 @@ class Models:
         
         main_scorer_str = multi_scoring[main_key]
         X_train = self.pre.train_data
-        y_train = self.pre.get_y_for_fit(self.pre.train_labels)
+        y_train = self.pre.train_labels
 
         models_dict = self.get_models()
         if not models_dict:
@@ -433,7 +433,7 @@ class Models:
         if self.pre.validation_data is not None and self.pre.validation_labels is not None:
             try:
                 X_val = self.pre.validation_data
-                y_val = self.pre.get_y_for_fit(self.pre.validation_labels)
+                y_val = self.pre.validation_labels
                 val_scores = {}
                 for k, scorer_str in multi_scoring.items():
                     sc = get_scorer(scorer_str)

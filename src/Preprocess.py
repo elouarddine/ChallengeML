@@ -29,6 +29,7 @@ class Preprocess:
         self.test_labels = None
         self.validation_data = None
         self.validation_labels = None
+        self.task_type = None
     
     
     @staticmethod
@@ -162,9 +163,11 @@ class Preprocess:
             target_type = type_of_target(y_1d)
             
             if target_type == "binary":
+                self.task_type = "binary"
                 return "binary"
             
             if target_type == "continuous":
+                self.task_type = "regression"
                 return "regression"
             
             if target_type == "multiclass":
@@ -172,7 +175,10 @@ class Preprocess:
                 uniq = np.unique(y_1d)
                 n = len(y_1d)
                 if len(uniq) > max(20, int(0.05 * n)):
+                    self.task_type = "regression"
+
                     return "regression"
+                self.task_type = "multiclass"
                 return "multiclass"
             
             return f"inconnu_{target_type}"
@@ -183,12 +189,16 @@ class Preprocess:
         if target_type == "multilabel-indicator":
             row_sums = y.sum(axis=1)
             if np.all(row_sums == 1):
+                self.task_type = "multiclass_onehot"
                 return "multiclass_onehot"
             if n_cols<=4:
+                self.task_type = "multiclass_code"
                 return "multiclass_code"
+            self.task_type = "multilabel"
             return "multilabel"
         
         if target_type == "continuous-multioutput":
+            self.task_type = "regression_multioutput"
             return "regression_multioutput"
         
         return f"inconnu_{target_type}"

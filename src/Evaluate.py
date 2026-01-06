@@ -16,7 +16,7 @@ class Evaluate:
             raise ValueError("test_data/test_labels est None. Appelle split() avant.")
 
         X_test = self.pre.test_data
-        y_test = self.pre.get_y_for_fit(self.pre.test_labels)
+        y_test = self.pre.test_labels
 
         _, multi_scoring = self.models.get_scoring(rare_threshold=rare_threshold)
         if multi_scoring is None:
@@ -33,7 +33,7 @@ class Evaluate:
         self.test_scores = scores
 
         t = self.pre.task_type
-        if t in ("binary", "multiclass", "multiclass_onehot"):
+        if t in ("binary", "multiclass", "multiclass_onehot", "multiclass_code"):
             y_pred = self.pipe.predict(X_test)
             self.test_confusion = confusion_matrix(y_test, y_pred)
             self.test_report = classification_report(y_test, y_pred, zero_division=0)
