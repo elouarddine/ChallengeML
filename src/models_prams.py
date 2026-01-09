@@ -127,7 +127,7 @@ def get_models(problem_type):
             'params_full': {
                 'iterations': [200, 500, 1000],
                 'learning_rate': [0.01, 0.03, 0.1],
-                'depth': [4, 6, 8, 10],
+                'depth': [4, 6, 7],
                 'l2_leaf_reg': [1, 3, 5, 7, 9],
                 'bagging_temperature': [0, 1]
             }
@@ -234,7 +234,7 @@ def get_models(problem_type):
             'params_full': {
                 'iterations': [200, 500, 1000],
                 'learning_rate': [0.01, 0.03, 0.1],
-                'depth': [4, 6, 8, 10],
+                'depth': [4, 6, 7],
                 'l2_leaf_reg': [1, 3, 5, 9]
             }
         }})
