@@ -77,7 +77,7 @@ def get_models(problem_type):
 
         models.update({
             'XGBoost': {
-            'estimator': XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42, n_jobs=-1),
+            'estimator': XGBClassifier( eval_metric='logloss', random_state=42, n_jobs=-1),
             'has_predict_proba': True,
             'params_light': {
                 'n_estimators': [50, 100],

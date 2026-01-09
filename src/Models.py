@@ -5,12 +5,15 @@ from sklearn.metrics import get_scorer
 from sklearn.ensemble import VotingClassifier,VotingRegressor
 from sklearn.base import clone
 from skopt import BayesSearchCV
+import warnings
 
 from src import models_prams as mp
 import os
 import csv
 import json
 from datetime import datetime
+warnings.filterwarnings("ignore", module="skopt")
+warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
 
 class Models:
@@ -155,10 +158,10 @@ class Models:
         # Choix des paramètres et itérations selon la méthode
         if method == "light":
             params_dict = model_info.get('params_light', {})
-            n_iter = 10 # Rapide pour le tri initial
+            n_iter = 5 # Rapide pour le tri initial
         elif method == "full":
             params_dict = model_info.get('params_full', {})
-            n_iter = 20 # Approfondi pour le Top 3
+            n_iter = 5 # Approfondi pour le Top 3
         else:
             # Fallback
             params_dict = {}
@@ -178,7 +181,18 @@ class Models:
         search_space = {f"model__{k}": v for k, v in params_dict.items()}
 
         print(f"   -> Optimisation {method} ({n_iter} itér.) pour {model_name}...")
-        
+
+        def status_print(optim_result):
+            """Affiche le score à chaque étape de l'optimisation bayésienne"""
+            # On récupère tous les scores testés jusqu'ici
+            all_scores = optim_result.func_vals
+            # Le dernier score obtenu
+            current_score = all_scores[-1]
+            # Le meilleur score jusqu'ici (attention, skopt minimise, donc on inverse souvent le signe)
+            best_score = optim_result.fun
+
+            print(f" > Étape terminée. Score actuel : {-current_score:.4f} | Meilleur global : {-best_score:.4f}")
+                
         # Configuration BayesSearchCV
         opt = BayesSearchCV(
             estimator=pipe,
@@ -188,11 +202,11 @@ class Models:
             scoring=scoring, # Doit être une métrique unique (ex: 'roc_auc')
             n_jobs=n_jobs,
             random_state=42,
-            verbose=3
+            verbose=0
         )
 
         try:
-            opt.fit(X, y)
+            opt.fit(X, y, callback=status_print)
             return opt.best_estimator_
         except Exception as e:
             print(f"   [Warning] Echec optimisation {model_name}: {e}. Utilisation défaut.")
@@ -213,6 +227,12 @@ class Models:
         main_scorer_str = multi_scoring[main_key]
         X_train = self.pre.train_data
         y_train = self.pre.train_labels
+
+        if hasattr(y_train, 'values'):
+            y_train = y_train.values.ravel()
+        # Si c'est déjà un array numpy
+        elif hasattr(y_train, 'ravel'):
+            y_train = y_train.ravel()
 
         models_dict = self.get_models()
         if not models_dict:
