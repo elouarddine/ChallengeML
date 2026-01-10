@@ -3,11 +3,12 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler, MaxAbsScaler,LabelEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, MaxAbsScaler,LabelEncoder,OrdinalEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.utils.multiclass import type_of_target
 from scipy.sparse import csr_matrix, issparse
+from sklearn.feature_selection import SelectKBest, f_classif, f_regression
 
 
 class Preprocess:
@@ -356,7 +357,7 @@ class Preprocess:
         # Remplacement des Nan par des valeur en utilisant la methode most_frequent
         categorical_pipeline = Pipeline(steps=[
             ("imputer", SimpleImputer(strategy="most_frequent")),
-            ("onehot", OneHotEncoder(handle_unknown="ignore")),
+            ("ordinal", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
         ])
         
         # Pas besoin d'encodage car c'est deja des chiffre 0 et 1 
@@ -373,6 +374,20 @@ class Preprocess:
             transformers.append(("bin", binary_pipeline, self.binary_index))
         
         preprocessor = ColumnTransformer(transformers=transformers, remainder="drop")
+        x=self.data.values
+        if x.shape[1]>50:
+            task=self.detect_task_type()
+            if task in ["binary", "multiclass", "multiclass_code", "multiclass_onehot", "multilabel"]:
+                full_pipeline = Pipeline(steps=[
+                    ("preprocessor", preprocessor),
+                    ("selector", SelectKBest(score_func=f_classif, k=50))
+                ])
+            elif task == "regression":
+                full_pipeline = Pipeline(steps=[
+                    ("preprocessor", preprocessor),
+                    ("selector", SelectKBest(score_func=f_regression, k=50))
+                ])
+            return full_pipeline
         return preprocessor
     
     

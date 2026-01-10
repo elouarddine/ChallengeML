@@ -95,26 +95,7 @@ def get_models(problem_type):
         }})
 
 
-        models.update({
-            'LightGBM': {
-            'estimator': LGBMClassifier(random_state=42, n_jobs=-1, verbose=-1),
-            'has_predict_proba': True,
-            'params_light': {
-                'n_estimators': [50, 100],
-                'learning_rate': [0.05, 0.1],
-                'num_leaves': [31, 50]
-            },
-            'params_full': {
-                'n_estimators': [100, 200, 500],
-                'learning_rate': [0.01, 0.05, 0.1],
-                'num_leaves': [31, 50, 70, 100],
-                'max_depth': [-1, 10, 20],
-                'min_child_samples': [20, 50, 100],
-                'reg_alpha': [0, 0.1, 1],
-                'reg_lambda': [0, 0.1, 1]
-            }
-        }})
-
+        
         models.update({
             'CatBoost': {
             'estimator': CatBoostClassifier(verbose=0, random_state=42, allow_writing_files=False),
@@ -127,7 +108,7 @@ def get_models(problem_type):
             'params_full': {
                 'iterations': [200, 500, 1000],
                 'learning_rate': [0.01, 0.03, 0.1],
-                'depth': [4, 6, 7],
+                'depth': [4, 6],
                 'l2_leaf_reg': [1, 3, 5, 7, 9],
                 'bagging_temperature': [0, 1]
             }
@@ -204,23 +185,6 @@ def get_models(problem_type):
                 'max_depth': [3, 5, 7, 9],
                 'subsample': [0.6, 0.8, 1.0],
                 'colsample_bytree': [0.6, 0.8, 1.0]
-            }
-        }})
-        models.update({
-            'LightGBM': {
-            'estimator': LGBMRegressor(random_state=42, n_jobs=-1, verbose=-1),
-            'params_light': {
-                'n_estimators': [50, 100],
-                'learning_rate': [0.05, 0.1],
-                'num_leaves': [31, 50]
-            },
-            'params_full': {
-                'n_estimators': [100, 200, 500],
-                'learning_rate': [0.01, 0.05, 0.1],
-                'num_leaves': [31, 50, 70, 100],
-                'max_depth': [-1, 10, 20],
-                'reg_alpha': [0, 0.1, 1],
-                'reg_lambda': [0, 0.1, 1]
             }
         }})
         models.update({
