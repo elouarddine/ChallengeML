@@ -10,7 +10,7 @@ def main():
     # Définition du chemin vers les données (exemple avec data_A)
     # Ajustez le 'data_A' pour tester d'autres datasets (data_B, data_C, etc.)
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    data_path = os.path.join(base_dir, '..', 'data', 'data_A')
+    data_path = os.path.join(base_dir, '..', 'data', 'data_C')
     data_path = os.path.normpath(data_path)
     
     # Vérification que le dossier existe

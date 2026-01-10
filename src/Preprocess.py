@@ -192,7 +192,7 @@ class Preprocess:
             if np.all(row_sums == 1):
                 self.task_type = "multiclass_onehot"
                 return "multiclass_onehot"
-            if n_cols<=4:
+            if n_cols<2:
                 self.task_type = "multiclass_code"
                 return "multiclass_code"
             self.task_type = "multilabel"

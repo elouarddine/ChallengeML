@@ -5,6 +5,7 @@ from sklearn.metrics import get_scorer
 from sklearn.ensemble import VotingClassifier,VotingRegressor
 from sklearn.base import clone
 from skopt import BayesSearchCV
+
 import warnings
 
 from src import models_prams as mp
@@ -14,6 +15,8 @@ import json
 from datetime import datetime
 warnings.filterwarnings("ignore", module="skopt")
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
+warnings.filterwarnings("ignore", message="Features .* are constant")
+warnings.filterwarnings("ignore", message="invalid value encountered in divide")
 
 
 class Models:
@@ -228,11 +231,18 @@ class Models:
         X_train = self.pre.train_data
         y_train = self.pre.train_labels
 
-        if hasattr(y_train, 'values'):
-            y_train = y_train.values.ravel()
-        # Si c'est déjà un array numpy
-        elif hasattr(y_train, 'ravel'):
-            y_train = y_train.ravel()
+        if self.task_type == "multiclass_onehot":
+            # Conversion OneHot -> Class Index (1D)
+            if hasattr(y_train, 'values'):
+                y_train = y_train.values.argmax(axis=1)
+            else:
+                y_train = y_train.argmax(axis=1)
+        elif self.task_type != "multilabel":
+            # Cas standard (binary/multiclass/regression)
+            if hasattr(y_train, 'values'):
+                y_train = y_train.values.ravel()
+            elif hasattr(y_train, 'ravel'):
+                y_train = y_train.ravel()
 
         models_dict = self.get_models()
         if not models_dict:
@@ -366,7 +376,7 @@ class Models:
         winner_score = best_single_model["score"]
 
         # On ne vote que si on a au moins 2 modèles finaux valides et que c'est de la classification
-        if len(final_candidates) > 1:
+        if len(final_candidates) > 1 and self.task_type != "multilabel":
             print("\n=== ÉTAPE 3 : Ensemble (Voting) ===")
             
             estimators_list = []
@@ -387,7 +397,7 @@ class Models:
                 
                 voting_type = 'soft' if can_use_soft_voting else 'hard'
                 voting_desc = f"VotingClassifier ({voting_type})"
-                voting_model = VotingClassifier(estimators=estimators_list, voting=voting_type, n_jobs=n_jobs)
+                voting_model = VotingClassifier(estimators=estimators_list, voting='hard', n_jobs=n_jobs)
 
             # CAS 2 : RÉGRESSION
             elif self.task_type.lower() == "regression":
