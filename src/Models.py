@@ -161,7 +161,7 @@ class Models:
             n_iter = 5 # Rapide pour le tri initial
         elif method == "full":
             params_dict = model_info.get('params_full', {})
-            n_iter = 5 # Approfondi pour le Top 3
+            n_iter = 7 # Approfondi pour le Top 3
         else:
             # Fallback
             params_dict = {}
