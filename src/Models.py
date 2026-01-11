@@ -1,495 +1,304 @@
-
-from sklearn.pipeline import Pipeline
-from sklearn.model_selection import cross_validate
-from sklearn.metrics import get_scorer
-from sklearn.ensemble import VotingClassifier,VotingRegressor
-from sklearn.base import clone
-from skopt import BayesSearchCV
-
-import warnings
-
-from src import models_prams as mp
 import os
 import csv
 import json
 from datetime import datetime
-warnings.filterwarnings("ignore", module="skopt")
-warnings.filterwarnings("ignore", message="X does not have valid feature names")
-warnings.filterwarnings("ignore", message="Features .* are constant")
-warnings.filterwarnings("ignore", message="invalid value encountered in divide")
+from sklearn.model_selection import cross_validate
+from sklearn.metrics import get_scorer
+from sklearn.ensemble import VotingClassifier, VotingRegressor
+from skopt import BayesSearchCV
+from skopt.space import Categorical
+from .ModelesConditions import ModelesConditions
+from .ConstructeurPipeline import ConstructeurPipeline
 
 
 class Models:
     def __init__(self, preprocessor_obj, random_state=42):
         self.pre = preprocessor_obj
-        self.random_state = random_state
+        self.random_state = int(random_state)
         if self.pre.task_type is None:
             self.pre.detect_task_type()
         self.task_type = self.pre.task_type
+        self.catalogue = ModelesConditions(random_state=self.random_state)
+        self.builder = ConstructeurPipeline(preprocessor_obj=self.pre, random_state=self.random_state)
         self.best_name = None
         self.best_pipeline = None
         self.cv_summary = None
         self.val_scores = None
+        self.selection_report = None
 
-    def get_models(self):
-        rs = self.random_state
+    def get_scoring(self, rare_threshold=0.30):
         t = self.task_type
-    
-        """ if t in ("binary", "multiclass","multiclass_code", "multiclass_onehot"):
-            #import des modèles de classification
-            from sklearn.linear_model import LogisticRegression
-            from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
-            from xgboost import XGBClassifier
-            from lightgbm import LGBMClassifier
-            from catboost import CatBoostClassifier
-
-
-
-            return [
-                ("logreg", LogisticRegression(max_iter=2000, random_state=rs)),
-                ("rf", RandomForestClassifier(random_state=rs)),
-                ("hgb", HistGradientBoostingClassifier(random_state=rs)),
-                ("xgb", XGBClassifier(random_state=rs)),
-                ("lgbm", LGBMClassifier(random_state=rs, verbose=-1)),
-                ("cat", CatBoostClassifier(random_state=rs, verbose=0))
-            ]
-
-        if t == "regression":
-            #import des modèles de régression
-            from sklearn.linear_model import  ElasticNet
-            from sklearn.ensemble import RandomForestRegressor, HistGradientBoostingRegressor
-            from xgboost import XGBRegressor
-            from lightgbm import LGBMRegressor
-            from catboost import CatBoostRegressor
-
-            return [
-                
-                
-                ("elastic", ElasticNet(random_state=rs)),  
-                ("rf_reg", RandomForestRegressor(random_state=rs)),
-                ("hgb_reg", HistGradientBoostingRegressor(random_state=rs)),
-                ("xgb_reg", XGBRegressor(random_state=rs)),
-                ("lgbm_reg", LGBMRegressor(random_state=rs, verbose=-1)),
-                ("cat_reg", CatBoostRegressor(random_state=rs, verbose=0))
-            ] """
-        
-        if t == "multilabel":
-            #import des modèles de multilabel
-            from sklearn.linear_model import LogisticRegression
-            from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
-            from sklearn.multiclass import OneVsRestClassifier
-            from lightgbm import LGBMClassifier
-
-            return {
-                "ovr_logreg": {
-                    "estimator": OneVsRestClassifier(LogisticRegression(max_iter=2000, random_state=rs)),
-                    "params_light": {}, # Vide = pas d'optimisation (utilise les défauts)
-                    "params_full": {},
-                    "has_predict_proba": True 
-                },
-                "ovr_rf": {
-                    "estimator": OneVsRestClassifier(RandomForestClassifier(random_state=rs)),
-                    "params_light": {},
-                    "params_full": {},
-                    "has_predict_proba": True
-                },
-                "ovr_hgb": {
-                    "estimator": OneVsRestClassifier(HistGradientBoostingClassifier(random_state=rs)),
-                    "params_light": {},
-                    "params_full": {},
-                    "has_predict_proba": True 
-                },
-                "rf_native": {
-                    "estimator": RandomForestClassifier(random_state=rs), # Nativement multilabel
-                    "params_light": {},
-                    "params_full": {},
-                    "has_predict_proba": True
-                },
-                "ovr_lgbm": {
-                    "estimator": OneVsRestClassifier(LGBMClassifier(random_state=rs, verbose=-1)),
-                    "params_light": {},
-                    "params_full": {},
-                    "has_predict_proba": True
-                }
-            }
-        
-        # or plus plus facilement on fait 
-        return mp.get_models(self.task_type)
-        
-
-        
-
-    def get_scoring(self, rare_threshold=0.10):
-
-        t = self.task_type
-        is_imb, _, _ = self.pre.check_imbalance(rare_threshold=rare_threshold)
+        y_ref = self.pre.train_labels if self.pre.train_labels is not None else self.pre.labels
+        is_imb, _, _ = self.pre.check_imbalance(y_df=y_ref, rare_threshold=rare_threshold)
 
         if t in ("binary", "multiclass", "multiclass_onehot"):
             main_key = "f1_macro" if is_imb else "accuracy"
-            multi_scoring = {
-                "accuracy": "accuracy",
-                "balanced_accuracy": "balanced_accuracy",
-                "f1_macro": "f1_macro",
-            }
+            multi_scoring = {"accuracy": "accuracy", "balanced_accuracy": "balanced_accuracy", "f1_macro": "f1_macro"}
             return main_key, multi_scoring
 
         if t in ("regression", "regression_multioutput"):
             main_key = "mae"
-            multi_scoring = {
-                "mae": "neg_mean_absolute_error",
-                "rmse": "neg_root_mean_squared_error",
-                "r2": "r2",
-            }
+            multi_scoring = {"mae": "neg_mean_absolute_error", "rmse": "neg_root_mean_squared_error", "r2": "r2"}
             return main_key, multi_scoring
 
         if t == "multilabel":
             main_key = "f1_macro" if is_imb else "f1_micro"
-            multi_scoring = {
-                "f1_micro": "f1_micro",
-                "f1_macro": "f1_macro",
-            }
+            multi_scoring = {"f1_micro": "f1_micro", "f1_macro": "f1_macro"}
             return main_key, multi_scoring
 
         return None, None
-    
-    def optimisation_model(self, model_name, model_info, X, y, method="light", cv=3, scoring="accuracy", n_jobs=-1):
-        """
-        Construit un pipeline et optimise les hyperparamètres via BayesSearchCV.
-        """
-        estimator = model_info['estimator']
-        
-        # Choix des paramètres et itérations selon la méthode
-        if method == "light":
-            params_dict = model_info.get('params_light', {})
-            n_iter = 5 # Rapide pour le tri initial
-        elif method == "full":
-            params_dict = model_info.get('params_full', {})
-            n_iter = 7 # Approfondi pour le Top 3
-        else:
-            # Fallback
-            params_dict = {}
-            n_iter = 1
 
-        # Construction du Pipeline
-        # On clone l'estimateur pour ne pas modifier l'original stocké dans self.models
-        preproc = self.pre.build_preprocessor(scale_numeric=True)
-        pipe = Pipeline([("preprocess", preproc), ("model", clone(estimator))])
+    # permer d'afficher le details des score de chaque model
+    def get_scoring_details(self, rare_threshold=0.30):
+        t = self.task_type
+        y_ref = self.pre.train_labels if self.pre.train_labels is not None else self.pre.labels
+        is_imb, info, stats = self.pre.check_imbalance(y_df=y_ref, rare_threshold=rare_threshold)
+        main_key, multi_scoring = self.get_scoring(rare_threshold=rare_threshold)
+        return main_key, multi_scoring, bool(is_imb), info, stats
 
-        # Si pas de paramètres à optimiser, on retourne le pipe brut fité
-        if not params_dict:
-            pipe.fit(X, y)
-            return pipe
+    def _is_error_metric(self, main_key):
+        return str(main_key).strip().lower() in ("mae", "rmse")
 
-        # Préfixer les paramètres avec "model__" pour le Pipeline
-        search_space = {f"model__{k}": v for k, v in params_dict.items()}
+    def _fix_signed_metric(self, scorer_str, value):
+        return -float(value) if isinstance(scorer_str, str) and scorer_str.startswith("neg_") else float(value)
 
-        print(f"   -> Optimisation {method} ({n_iter} itér.) pour {model_name}...")
+    def _is_better(self, main_key, current, best):
+        if best is None:
+            return True
+        if self._is_error_metric(main_key):
+            return float(current) < float(best)
+        return float(current) > float(best)
 
-        def status_print(optim_result):
-            """Affiche le score à chaque étape de l'optimisation bayésienne"""
-            # On récupère tous les scores testés jusqu'ici
-            all_scores = optim_result.func_vals
-            # Le dernier score obtenu
-            current_score = all_scores[-1]
-            # Le meilleur score jusqu'ici (attention, skopt minimise, donc on inverse souvent le signe)
-            best_score = optim_result.fun
+    def _sort_candidates(self, main_key, candidates):
+        return sorted(candidates, key=lambda d: float(d["score"]), reverse=(not self._is_error_metric(main_key)))
 
-            print(f" > Étape terminée. Score actuel : {-current_score:.4f} | Meilleur global : {-best_score:.4f}")
-                
-        # Configuration BayesSearchCV
-        opt = BayesSearchCV(
-            estimator=pipe,
-            search_spaces=search_space,
-            n_iter=n_iter,
-            cv=cv,
-            scoring=scoring, # Doit être une métrique unique (ex: 'roc_auc')
-            n_jobs=n_jobs,
-            random_state=42,
-            verbose=0
-        )
+    def _make_search_space(self, params_dict):
+        if not isinstance(params_dict, dict) or len(params_dict) == 0:
+            return {}
+        space = {}
+        for k, v in params_dict.items():
+            if isinstance(v, (list, tuple)) and len(v) > 0:
+                space[f"model__{k}"] = Categorical(list(v))
+        return space
 
+    def optimisation_model(self, model_name, model_info, X, y, method="light", cv=3, scoring=None, n_jobs=-1, n_iter_light=8, n_iter_full=25, onehot_sparse=True, force_output=None, reducer=None, n_components=50, scale_override=None, poly_override=None, poly_degree=2, poly_interaction_only=True, poly_include_bias=False):
+
+        if model_info is None or "estimator" not in model_info:
+            return None
+
+        pipe = self.builder.build_pipeline(model_info=model_info, onehot_sparse=bool(onehot_sparse), force_output=force_output, reducer=reducer, n_components=int(n_components), scale_override=scale_override, poly_override=poly_override, poly_degree=int(poly_degree), poly_interaction_only=bool(poly_interaction_only), poly_include_bias=bool(poly_include_bias), X_for_probe=X)
+        if pipe is None:
+            return None
+
+        params_dict = model_info.get("params_light", {}) if str(method).strip().lower() == "light" else model_info.get("params_full", {})
+        search_space = self._make_search_space(params_dict)
+
+        if not search_space:
+            try:
+                cv_res = cross_validate(pipe, X, y, cv=int(cv), scoring=scoring, n_jobs=int(n_jobs), error_score="raise")
+                m = float(cv_res["test_score"].mean())
+                m = self._fix_signed_metric(scoring, m)
+                pipe.fit(X, y)
+                pipe._automl_best_score_ = m
+                return pipe
+            except Exception:
+                return None
+
+        n_iter = int(n_iter_light) if str(method).strip().lower() == "light" else int(n_iter_full)
+
+        opt = BayesSearchCV(estimator=pipe, search_spaces=search_space, n_iter=int(n_iter), cv=int(cv), scoring=scoring, n_jobs=int(n_jobs), random_state=self.random_state, verbose=0, refit=True)
         try:
-            opt.fit(X, y, callback=status_print)
-            return opt.best_estimator_
-        except Exception as e:
-            print(f"   [Warning] Echec optimisation {model_name}: {e}. Utilisation défaut.")
-            pipe.fit(X, y)
-            return pipe
-    
+            opt.fit(X, y)
+            best = opt.best_estimator_
+            best._automl_best_score_ = self._fix_signed_metric(scoring, float(opt.best_score_))
+            return best
+        except Exception:
+            try:
+                cv_res = cross_validate(pipe, X, y, cv=int(cv), scoring=scoring, n_jobs=int(n_jobs), error_score="raise")
+                m = float(cv_res["test_score"].mean())
+                m = self._fix_signed_metric(scoring, m)
+                pipe.fit(X, y)
+                pipe._automl_best_score_ = m
+                return pipe
+            except Exception:
+                return None
 
+    def _eval_cv(self, pipe, X, y, cv, multi_scoring, n_jobs):
+        cv_res = cross_validate(pipe, X, y, cv=int(cv), scoring=multi_scoring, n_jobs=int(n_jobs), error_score="raise")
+        row = {}
+        for k, scorer_str in multi_scoring.items():
+            m = float(cv_res[f"test_{k}"].mean())
+            s = float(cv_res[f"test_{k}"].std())
+            m = self._fix_signed_metric(scorer_str, m)
+            row[f"{k}_mean"] = m
+            row[f"{k}_std"] = s
+        return row
 
-    def select_best_model(self, cv=5, scale_numeric=True, rare_threshold=0.10, n_jobs=-1):
-        # --- 1. Vérifications initiales ---
+    def _build_voting(self, candidates, models_dict, n_jobs):
+        if not isinstance(candidates, list) or len(candidates) < 2:
+            return None, None
+
+        estimators_list = [(c["name"], c["pipe"]) for c in candidates if c.get("pipe") is not None]
+        if len(estimators_list) < 2:
+            return None, None
+
+        t = str(self.task_type).strip().lower()
+
+        if t in ("binary", "multiclass", "multiclass_onehot"):
+            can_soft = True
+            for name, _ in estimators_list:
+                info = models_dict.get(name, {})
+                if not bool(info.get("has_predict_proba", False)):
+                    can_soft = False
+            voting_type = "soft" if can_soft else "hard"
+            return VotingClassifier(estimators=estimators_list, voting=voting_type, n_jobs=int(n_jobs)), f"VotingClassifier_{voting_type}"
+
+        if t in ("regression", "regression_multioutput"):
+            return VotingRegressor(estimators=estimators_list, n_jobs=int(n_jobs)), "VotingRegressor"
+
+        return None, None
+
+    def select_best_model(self, cv=5, rare_threshold=0.30, n_jobs=-1, bayes_cv=3, n_iter_light=8, n_iter_full=25, top_k=3, onehot_sparse=True, force_output=None, reducer=None, n_components=50, scale_override=None, poly_override=None, poly_degree=2, poly_interaction_only=True, poly_include_bias=False):
+
+        print("AutoML | [Selection] Starting model selection", flush=True)
+
         if self.pre.train_data is None or self.pre.train_labels is None:
             raise ValueError("Appelle pre.split() avant select_best_model().")
 
-        main_key, multi_scoring = self.get_scoring(rare_threshold=rare_threshold)
+        main_key, multi_scoring, is_imb, imb_info, imb_stats = self.get_scoring_details(rare_threshold=rare_threshold)
         if main_key is None:
             raise ValueError(f"Task type non géré: {self.task_type}")
-        
+
         main_scorer_str = multi_scoring[main_key]
         X_train = self.pre.train_data
-        y_train = self.pre.train_labels
+        y_train = self.pre.get_y_for_fit(self.pre.train_labels)
 
-        if self.task_type == "multiclass_onehot":
-            # Conversion OneHot -> Class Index (1D)
-            if hasattr(y_train, 'values'):
-                y_train = y_train.values.argmax(axis=1)
-            else:
-                y_train = y_train.argmax(axis=1)
-        elif self.task_type != "multilabel":
-            # Cas standard (binary/multiclass/regression)
-            if hasattr(y_train, 'values'):
-                y_train = y_train.values.ravel()
-            elif hasattr(y_train, 'ravel'):
-                y_train = y_train.ravel()
-
-        models_dict = self.get_models()
-        if not models_dict:
-            raise ValueError(f"Aucun modèle retourné pour task_type={self.task_type}")
+        models_dict = self.catalogue.get_modeles(self.task_type)
+        ordered = self.catalogue.trier_par_priorite(models_dict)
 
         results = []
         candidates_light = []
+        tested_light = []
+        tested_full = []
 
-        print("\n=== ÉTAPE 1 : Optimisation LIGHT et sélection Top 3 ===")
-        
-        # --- 2. Boucle Light Optimization (Sécurisée) ---
-        for name, info in models_dict.items():
-            print(f"-> Traitement modèle : {name}")
+        best_light_name, best_light_pipe, best_light_score = None, None, None
+
+        for name, info in ordered:
+            print("AutoML | [Light] Optimising model: " + str(name), flush=True)
+            pipe_light = self.optimisation_model(model_name=name, model_info=info, X=X_train, y=y_train, method="light", cv=bayes_cv, scoring=main_scorer_str, n_jobs=n_jobs, n_iter_light=n_iter_light, n_iter_full=n_iter_full, onehot_sparse=onehot_sparse, force_output=force_output, reducer=reducer, n_components=n_components, scale_override=scale_override, poly_override=poly_override, poly_degree=poly_degree, poly_interaction_only=poly_interaction_only, poly_include_bias=poly_include_bias)
+            if pipe_light is None:
+                continue
             try:
-                # A. Optimisation Light
-                # (Note: optimisation_model a déjà son propre try/except interne pour renvoyer un pipe par défaut, c'est ok)
-                optimized_pipe_light = self.optimisation_model(
-                    name, info, X_train, y_train, 
-                    method="light", cv=3, scoring=main_scorer_str, n_jobs=n_jobs
-                )
+                score_main = float(getattr(pipe_light, "_automl_best_score_", None))
+                if score_main != score_main:
+                    continue
 
-                # B. Évaluation Cross-Validation (Le point critique)
-                # On utilise error_score="raise" pour que ça plante ici si le modèle est mauvais
-                # et que ça aille dans le "except" ci-dessous.
-                cv_res = cross_validate(
-                    optimized_pipe_light, X_train, y_train, 
-                    cv=cv, scoring=multi_scoring, n_jobs=n_jobs, 
-                    error_score="raise" 
-                )
+                candidates_light.append({"name": name, "pipe": pipe_light, "score": score_main})
+                tested_light.append({"name": name, "score": score_main})
 
-                # C. Stockage stats
-                row = {"model": f"{name} (Light)"}
-                for k in multi_scoring.keys():
-                    m = float(cv_res[f"test_{k}"].mean())
-                    s = float(cv_res[f"test_{k}"].std())
-                    sc_name = multi_scoring[k]
-                    if isinstance(sc_name, str) and sc_name.startswith("neg_"):
-                        m, s = -m, s
-                    row[f"{k}_mean"] = m
-                    row[f"{k}_std"] = s
-                
-                results.append(row)
-                
-                # Ajout aux candidats valides
-                candidates_light.append({
-                    "name": name,
-                    "info": info,
-                    "score": row[f"{main_key}_mean"],
-                    "pipe": optimized_pipe_light
-                })
+                if self._is_better(main_key, score_main, best_light_score):
+                    best_light_score, best_light_name, best_light_pipe = score_main, name, pipe_light
 
-            except Exception as e:
-                print(f"   [SKIP] Le modèle {name} a échoué lors de l'évaluation Light.")
-                print(f"   Erreur : {e}")
-                continue # On passe au modèle suivant sans arrêter le script
+                print("AutoML | [Light] Done: " + str(name) + " => " + str(main_key) + "=" + str(score_main), flush=True)
 
-        # --- Vérification de survie ---
+            except Exception:
+                continue
+
         if not candidates_light:
-            raise RuntimeError("Tous les modèles ont échoué lors de la phase Light. Vérifiez vos données ou votre scoring.")
+            raise RuntimeError("Tous les modèles ont échoué en phase Light.")
 
-        # --- 3. Sélection Top 3 ---
-        # Tri décroissant selon le score principal
-        candidates_light.sort(key=lambda x: x["score"], reverse=True)
-        top_3 = candidates_light[:3]
-        
-        print(f"\nTop 3 sélectionnés : {[c['name'] for c in top_3]}")
+        candidates_light = self._sort_candidates(main_key, candidates_light)
+        top = candidates_light[:int(top_k)]
+        top_light = [{"name": c["name"], "score": float(c["score"])} for c in top]  # <--- AJOUT
 
         final_candidates = []
-        
-        print("\n=== ÉTAPE 2 : Optimisation FULL sur le Top 3 ===")
+        best_full_name, best_full_pipe, best_full_score = None, None, None
 
-        # --- 4. Boucle Full Optimization (Sécurisée aussi) ---
-        for cand in top_3:
+        for cand in top:
             name = cand["name"]
-            info = cand["info"]
-            
+            info = models_dict.get(name, None)
+            if info is None:
+                continue
+
+            print("AutoML | [Full] Optimising model: " + str(name), flush=True)
+            pipe_full = self.optimisation_model(model_name=name, model_info=info, X=X_train, y=y_train, method="full", cv=bayes_cv, scoring=main_scorer_str, n_jobs=n_jobs, n_iter_light=n_iter_light, n_iter_full=n_iter_full, onehot_sparse=onehot_sparse, force_output=force_output, reducer=reducer, n_components=n_components, scale_override=scale_override, poly_override=poly_override, poly_degree=poly_degree, poly_interaction_only=poly_interaction_only, poly_include_bias=poly_include_bias)
+            if pipe_full is None:
+                continue
             try:
-                # A. Optimisation Full
-                optimized_pipe_full = self.optimisation_model(
-                    name, info, X_train, y_train, 
-                    method="full", cv=cv, scoring=main_scorer_str, n_jobs=n_jobs
-                )
-                
-                # B. Évaluation Cross-Validation
-                cv_res = cross_validate(
-                    optimized_pipe_full, X_train, y_train, 
-                    cv=cv, scoring=multi_scoring, n_jobs=n_jobs, 
-                    error_score="raise"
-                )
-                
                 row = {"model": f"{name} (Full)"}
-                for k in multi_scoring.keys():
-                    m = float(cv_res[f"test_{k}"].mean())
-                    sc_name = multi_scoring[k]
-                    if isinstance(sc_name, str) and sc_name.startswith("neg_"):
-                        m = -m
-                    row[f"{k}_mean"] = m
-                
+                row.update(self._eval_cv(pipe=pipe_full, X=X_train, y=y_train, cv=cv, multi_scoring=multi_scoring, n_jobs=n_jobs))
                 results.append(row)
-                
-                final_candidates.append({
-                    "name": name,
-                    "pipe": optimized_pipe_full,
-                    "score": row[f"{main_key}_mean"]
-                })
-            
-            except Exception as e:
-                print(f"   [SKIP] Le modèle {name} a échoué lors de l'étape Full. On garde sa version Light si possible.")
-                print(f"   Erreur : {e}")
-                # Optionnel : On pourrait récupérer le cand['pipe'] (version Light) comme fallback
-                # Pour l'instant on l'ignore pour ne pas polluer le Voting avec un modèle instable
+                score_main = float(row[f"{main_key}_mean"])
+                print("AutoML | [Full] Done: " + str(name) + " => " + str(main_key) + "=" + str(score_main), flush=True)
+
+                final_candidates.append({"name": name, "pipe": pipe_full, "score": score_main})
+                tested_full.append({"name": name, "score": score_main})  # <--- AJOUT
+                if self._is_better(main_key, score_main, best_full_score):
+                    best_full_score, best_full_name, best_full_pipe = score_main, name, pipe_full
+            except Exception:
+                continue
 
         if not final_candidates:
-            # Si tout le Full échoue (très improbable), on reprend le Top 1 Light
-            print("Attention : Tous les modèles Full ont échoué. Repli sur le meilleur Light.")
-            best_light = top_3[0]
-            self.best_name = best_light["name"]
-            self.best_pipeline = best_light["pipe"]
-            self.best_pipeline.fit(X_train, y_train)
-            return self.best_name, self.best_pipeline, results, None
+            best_name, best_pipe = best_light_name, best_light_pipe
+            best_stage = "Light"
+        else:
+            print("AutoML | [Full] Evaluating voting (if possible)", flush=True)
 
-        # Tri des finalistes pour trouver le Top 1 actuel
-        final_candidates.sort(key=lambda x: x["score"], reverse=True)
-        best_single_model = final_candidates[0]
-        
-        print(f"Meilleur modèle individuel (Full) : {best_single_model['name']} - Score: {best_single_model['score']:.4f}")
+            final_candidates = self._sort_candidates(main_key, final_candidates)
+            best_name, best_pipe, best_score = final_candidates[0]["name"], final_candidates[0]["pipe"], final_candidates[0]["score"]
+            best_stage = "Full"
 
-        # --- 5. Création et Test du Voting Classifier ---
-        winner_name = best_single_model["name"]
-        winner_pipe = best_single_model["pipe"]
-        winner_score = best_single_model["score"]
-
-        # On ne vote que si on a au moins 2 modèles finaux valides et que c'est de la classification
-        if len(final_candidates) > 1 and self.task_type != "multilabel":
-            print("\n=== ÉTAPE 3 : Ensemble (Voting) ===")
-            
-            estimators_list = []
-            for cand in final_candidates:
-                estimators_list.append((cand["name"], cand["pipe"]))
-
-            voting_model = None
-            voting_desc = ""
-
-            # CAS 1 : CLASSIFICATION
-            if self.task_type.lower() in ("binary", "multiclass", "multiclass_code", "multiclass_onehot"):
-                can_use_soft_voting = True
-                for name, _ in estimators_list:
-                    # On vérifie dans le dictionnaire original si proba est dispo
-                    original_info = models_dict.get(name, {})
-                    if not original_info.get('has_predict_proba', False):
-                        can_use_soft_voting = False
-                
-                voting_type = 'soft' if can_use_soft_voting else 'hard'
-                voting_desc = f"VotingClassifier ({voting_type})"
-                voting_model = VotingClassifier(estimators=estimators_list, voting='hard', n_jobs=n_jobs)
-
-            # CAS 2 : RÉGRESSION
-            elif self.task_type.lower() == "regression":
-                voting_desc = "VotingRegressor"
-                voting_model = VotingRegressor(estimators=estimators_list, n_jobs=n_jobs)
-
-            # Évaluation commune
-            if voting_model is not None:
+            vote_full, vote_full_desc = self._build_voting(candidates=final_candidates, models_dict=models_dict, n_jobs=n_jobs)
+            if vote_full is not None:
                 try:
-                    # On utilise les mêmes settings de CV
-                    cv_res_v = cross_validate(
-                        voting_model, X_train, y_train, 
-                        cv=cv, scoring=multi_scoring, n_jobs=n_jobs, 
-                        error_score="raise"
-                    )
-                    
-                    v_score_raw = cv_res_v[f"test_{main_key}"].mean()
-                    
-                    # Gestion du signe (ex: neg_mean_absolute_error)
-                    scorer_str = multi_scoring[main_key]
-                    if isinstance(scorer_str, str) and scorer_str.startswith("neg_"):
-                        v_score = -float(v_score_raw)
-                    else:
-                        v_score = float(v_score_raw)
-                    
-                    # Sauvegarde résultat
-                    row_v = {"model": f"Ensemble ({voting_desc})"}
-                    row_v[f"{main_key}_mean"] = v_score
+                    row_v = {"model": f"Ensemble ({vote_full_desc}) (Full)"}
+                    row_v.update(self._eval_cv(pipe=vote_full, X=X_train, y=y_train, cv=cv, multi_scoring=multi_scoring, n_jobs=n_jobs))
                     results.append(row_v)
-                    
-                    print(f"Score {voting_desc}: {v_score:.4f} vs Top 1 Single: {winner_score:.4f}")
+                    v_score = float(row_v[f"{main_key}_mean"])
+                    tested_full.append({"name": f"Ensemble({vote_full_desc})", "score": v_score})  # <--- AJOUT
+                    if self._is_better(main_key, v_score, best_score):
+                        best_name, best_pipe = f"Ensemble_{vote_full_desc}_Full", vote_full
+                except Exception:
+                    pass
 
-                    # Le Voting gagne-t-il ?
-                    # Note: Assure-toi que "score" est toujours "plus c'est haut mieux c'est"
-                    # Si c'est une erreur (MAE/RMSE), ton code précédent convertissait déjà en positif via le check "neg_"
-                    # donc v_score > winner_score est correct si on compare des précisions ou des erreurs inversées (neg_mae).
-                    # Si tu compares des MAE pures (positives), il faudrait v_score < winner_score.
-                    # Mais vu ta logique précédente (neg_), > est correct.
-                    
-                    if v_score > winner_score:
-                        print(">>> L'ENSEMBLE GAGNE !")
-                        winner_name = f"Ensemble_{voting_desc}"
-                        winner_pipe = voting_model
-                    else:
-                        print(">>> LE MODÈLE INDIVIDUEL RESTE MEILLEUR.")
+        print("AutoML | [Train] Fitting selected model on full training data: " + str(best_name), flush=True)
+        best_pipe.fit(X_train, y_train)
 
-                except Exception as e:
-                    print(f"   [WARNING] L'Ensemble a échoué. On reste sur le Top 1.")
-                    print(f"   Erreur : {e}")
-
-        # --- 6. Refit Final et Retour ---
-        print(f"\nEntraînement final (Refit) du vainqueur : {winner_name}")
-        try:
-            winner_pipe.fit(X_train, y_train)
-        except Exception as e:
-            raise RuntimeError(f"Le refit final du modèle vainqueur ({winner_name}) a échoué: {e}")
-
-        self.best_name = winner_name
-        self.best_pipeline = winner_pipe
+        self.best_name = best_name
+        self.best_pipeline = best_pipe
         self.cv_summary = results
 
-        # Check Validation
+        print("AutoML | [Validation] Scoring selected model on validation set", flush=True)
+
         if self.pre.validation_data is not None and self.pre.validation_labels is not None:
-            try:
-                X_val = self.pre.validation_data
-                y_val = self.pre.validation_labels
-                val_scores = {}
-                for k, scorer_str in multi_scoring.items():
-                    sc = get_scorer(scorer_str)
-                    v = float(sc(self.best_pipeline, X_val, y_val))
-                    if isinstance(scorer_str, str) and scorer_str.startswith("neg_"):
-                        v = -v
-                    val_scores[k] = v
-                self.val_scores = val_scores
-            except Exception as e:
-                print(f"Attention: Calcul des scores de validation a échoué: {e}")
-                self.val_scores = None
+            X_val = self.pre.validation_data
+            y_val = self.pre.get_y_for_fit(self.pre.validation_labels)
+            val_scores = {}
+            for k, scorer_str in multi_scoring.items():
+                sc = get_scorer(scorer_str)
+                v = float(sc(self.best_pipeline, X_val, y_val))
+                v = self._fix_signed_metric(scorer_str, v)
+                val_scores[k] = v
+            self.val_scores = val_scores
 
-        return self.best_name, self.best_pipeline, self.cv_summary, getattr(self, 'val_scores', None)
+        #report clair pour automl.fit()
+        self.selection_report = {
+            "task_type": str(self.task_type),
+            "is_imbalanced": bool(is_imb),
+            "rare_threshold": float(rare_threshold),
+            "main_metric": str(main_key),
+            "tested_light": tested_light,
+            "top_light": top_light,
+            "tested_full": tested_full,
+            "best_model": str(self.best_name),
+            "best_stage": str(best_stage),
+            "val_scores": self.val_scores
+        }
 
+        return self.best_name, self.best_pipeline, self.cv_summary, self.val_scores
 
-
-
-    # Cette fonction permet d'enregistrer les resultat du process de selection de model
-    # ces resultat son stocker sous forme des fichier :
-    #
-    # meta.json : infos du run (task, modèle choisi, métrique principale…)
-    #
-    # cv_summary.csv : tableau des scores (mean/std) pour chaque modèle
-    #
-    # val_scores.json : scores sur validation
-
+    def get_selection_report(self):
+        return self.selection_report
 
     def save_results(self, base_dir="resultats", stage="selection", save_model=False):
         os.makedirs(base_dir, exist_ok=True)
@@ -509,12 +318,7 @@ class Models:
 
         os.makedirs(run_path, exist_ok=True)
 
-        meta = {
-            "dataset": dataset_tag,
-            "task_type": getattr(self.pre, "task_type", None),
-            "best_model": getattr(self, "best_name", None),
-            "stage": stage,
-        }
+        meta = {"dataset": dataset_tag, "task_type": getattr(self.pre, "task_type", None), "best_model": getattr(self, "best_name", None), "stage": stage}
 
         with open(os.path.join(run_path, "meta.json"), "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
@@ -526,7 +330,6 @@ class Models:
                 for k in row.keys():
                     if k not in keys:
                         keys.append(k)
-
             with open(os.path.join(run_path, "cv_summary.csv"), "w", newline="", encoding="utf-8") as f:
                 w = csv.DictWriter(f, fieldnames=keys)
                 w.writeheader()
@@ -538,5 +341,9 @@ class Models:
             with open(os.path.join(run_path, "val_scores.json"), "w", encoding="utf-8") as f:
                 json.dump(val_scores, f, indent=2, ensure_ascii=False)
 
+        if isinstance(self.selection_report, dict):
+            with open(os.path.join(run_path, "selection_report.json"), "w", encoding="utf-8") as f:
+                json.dump(self.selection_report, f, indent=2, ensure_ascii=False)
 
         return run_path
+
