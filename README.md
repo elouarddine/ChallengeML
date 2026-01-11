@@ -138,7 +138,3 @@ Odilon Ilboudo
 
 **Encadrants :**
 Aghilas Sini, Nicolas Dugue
-
-```
-::contentReference[oaicite:0]{index=0}
-```
