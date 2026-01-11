@@ -1,4 +1,3 @@
-```md
 # AutoML Challenge – Méthodologie IA & Méthodes Classiques
 
 ## Objectif du projet
