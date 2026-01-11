@@ -132,9 +132,9 @@ Il contient, pour chaque run :
 ## Auteurs & Encadrants
 
 **Contributeurs :**
-Salah Eddine Elouardi
-Mohammed Abdelhadi Benmansour
-Odilon Ilboudo
+Salah Eddine Elouardi,
+Mohammed Abdelhadi Benmansour,
+Odilon Ilboudo.
 
 **Encadrants :**
 Aghilas Sini, Nicolas Dugue
