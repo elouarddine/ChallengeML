@@ -37,7 +37,7 @@ Le projet attend un chemin “base” (sans extension), par exemple :
 - Régression : `regression`, `regression_multioutput`
 
 3) **Split des données**
-- Train / DEV (validation) / Test (selon votre implémentation dans `Preprocess`)
+- Train / DEV (validation) / Test (selon l'implémentation dans `Preprocess`)
 
 4) **Construction du pipeline**
 - Prétraitement + modèle (via `ConstructeurPipeline`)
